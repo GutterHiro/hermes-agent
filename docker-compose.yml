@@ -45,8 +45,6 @@ services:
     expose:
       - "9119"
     environment:
-      # Gera labels Traefik + roteia o domínio público -> porta 9119 do dashboard.
-      - SERVICE_URL_HERMES_9119
       # PUBLIC_URL fixo COM https:// — o OAuth monta redirect_uri = PUBLIC_URL +
       # /auth/callback, que precisa bater EXATO com o registrado no Nous. NÃO usar
       # ${SERVICE_FQDN_HERMES} aqui: ele vem sem scheme e quebraria o callback.
@@ -61,6 +59,18 @@ services:
     # host 0.0.0.0 (dentro do container) + SEM --insecure → auth OAuth ativa.
     # NÃO sobrescrever 'entrypoint': a imagem usa /init (s6-overlay) como PID 1.
     command: ["dashboard", "--host", "0.0.0.0", "--no-open"]
+    # Labels Traefik EXPLÍCITOS — espelham o padrão comprovado nesta VPS (o
+    # próprio coolify.iamthalles.com usa exatamente esta forma: router https +
+    # Host + tls + certresolver letsencrypt + loadbalancer.server.port).
+    # Determinístico: não depende do parsing da magic var (que falhou). O
+    # coolify-proxy (Traefik v3.6) já está na rede deste recurso, então alcança.
+    labels:
+      - traefik.enable=true
+      - 'traefik.http.routers.hermes-dashboard-https.rule=Host(`hermes.iamthalles.com`)'
+      - traefik.http.routers.hermes-dashboard-https.entrypoints=https
+      - traefik.http.routers.hermes-dashboard-https.tls=true
+      - traefik.http.routers.hermes-dashboard-https.tls.certresolver=letsencrypt
+      - traefik.http.services.hermes-dashboard.loadbalancer.server.port=9119
 
 volumes:
   hermes-data:

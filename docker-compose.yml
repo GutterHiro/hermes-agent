@@ -14,9 +14,7 @@
 
 services:
   gateway:
-    build: .
-    image: hermes-agent
-    container_name: hermes-gateway
+    image: hermes-agent:latest
     restart: unless-stopped
     expose:
       - "9119"
@@ -30,18 +28,21 @@ services:
     command: ["gateway", "run"]
 
   dashboard:
-    build: .
-    image: hermes-agent
-    container_name: hermes-dashboard
+    image: hermes-agent:latest
+      - AZURE_FOUNDRY_BASE_URL=${AZURE_FOUNDRY_BASE_URL:-https://personal-gutter-resource.openai.azure.com/openai/v1}
+    command: ["gateway", "run"]
+
+  dashboard:
+    image: hermes-agent:latest
     restart: unless-stopped
     depends_on:
       - gateway
     expose:
       - "9119"
     environment:
-      - SERVICE_FQDN_HERMES_9119
-      - HERMES_DASHBOARD_PUBLIC_URL=${SERVICE_FQDN_HERMES}
-      - HERMES_DASHBOARD_OAUTH_CLIENT_ID=${HERMES_DASHBOARD_OAUTH_CLIENT_ID:?set no Coolify}
+      - SERVICE_URL_HERMES_9119
+      - HERMES_DASHBOARD_PUBLIC_URL=https://hermes.iamthalles.com
+      - HERMES_DASHBOARD_OAUTH_CLIENT_ID=${HERMES_DASHBOARD_OAUTH_CLIENT_ID:?se
       - HERMES_UID=${HERMES_UID:-10000}
       - HERMES_GID=${HERMES_GID:-10000}
       - AZURE_FOUNDRY_API_KEY=${AZURE_FOUNDRY_API_KEY:?set no Coolify}

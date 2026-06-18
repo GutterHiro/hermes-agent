@@ -7,10 +7,11 @@
 #                                o Traefik do Coolify termina TLS e roteia.
 #                                NUNCA use ports:, senão a 9119 vaza no host)
 #
-# ROTEAMENTO (corrigido em 18/06): o domínio é injetado via SERVICE_URL_<NOME>_<PORTA>.
-#   - SERVICE_URL_HERMES_9119  → Coolify gera os labels do Traefik e roteia o
-#     domínio para a porta 9119 do dashboard. (A forma SERVICE_FQDN_HERMES_9119
-#     que usávamos antes é INVÁLIDA — Coolify ignorava e não gerava roteamento.)
+# ROTEAMENTO (corrigido em 18/06): labels Traefik EXPLÍCITOS no serviço dashboard
+#   (ver bloco labels: abaixo). Espelha o padrão comprovado do coolify.iamthalles.com.
+#   Abandonamos as magic vars SERVICE_FQDN/SERVICE_URL: a forma com porta exige
+#   hífen no identificador e a doc do Coolify é contraditória — labels explícitos
+#   são determinísticos e não dependem do parsing do Coolify.
 #
 # IMAGEM (18/06): usa `image:` (não `build:`) — a imagem hermes-agent:latest já
 #   foi construída e está no disco da VPS. Isso evita rebuild (que estourava o
@@ -46,8 +47,7 @@ services:
       - "9119"
     environment:
       # PUBLIC_URL fixo COM https:// — o OAuth monta redirect_uri = PUBLIC_URL +
-      # /auth/callback, que precisa bater EXATO com o registrado no Nous. NÃO usar
-      # ${SERVICE_FQDN_HERMES} aqui: ele vem sem scheme e quebraria o callback.
+      # /auth/callback, que precisa bater EXATO com o registrado no Nous.
       - HERMES_DASHBOARD_PUBLIC_URL=https://hermes.iamthalles.com
       - HERMES_DASHBOARD_OAUTH_CLIENT_ID=${HERMES_DASHBOARD_OAUTH_CLIENT_ID:?set no Coolify}
       - HERMES_UID=${HERMES_UID:-10000}

@@ -1,13 +1,21 @@
 # docker-compose.yml — Hermes backend para deploy no Coolify
 #
 # Adaptado do compose oficial (NousResearch/hermes-agent) para o MODELO COOLIFY:
-#   - SEM network_mode: host  (Coolify roteia por rede bridge própria + proxy)
+#   - SEM network_mode: host  (Coolify roteia por rede bridge própria + Traefik)
 #   - SEM bind 127.0.0.1       (dashboard binda 0.0.0.0 DENTRO do container)
 #   - SEM ports: publicados     (usa expose: — só a rede interna vê a porta;
-#                                o proxy do Coolify (Caddy nesta VPS) termina TLS
-#                                e roteia. NUNCA use ports:, senão a 9119 vaza na
-#                                interface pública do host)
-#   - Domínio/TLS via magic var do Coolify: SERVICE_FQDN_HERMES
+#                                o Traefik do Coolify termina TLS e roteia.
+#                                NUNCA use ports:, senão a 9119 vaza no host)
+#
+# ROTEAMENTO (corrigido em 18/06): o domínio é injetado via SERVICE_URL_<NOME>_<PORTA>.
+#   - SERVICE_URL_HERMES_9119  → Coolify gera os labels do Traefik e roteia o
+#     domínio para a porta 9119 do dashboard. (A forma SERVICE_FQDN_HERMES_9119
+#     que usávamos antes é INVÁLIDA — Coolify ignorava e não gerava roteamento.)
+#
+# IMAGEM (18/06): usa `image:` (não `build:`) — a imagem hermes-agent:latest já
+#   foi construída e está no disco da VPS. Isso evita rebuild (que estourava o
+#   disco de 38GB). Para atualizar o Hermes no futuro: liberar disco e voltar
+#   `build: .` temporariamente, ou usar um registry externo.
 #
 # Segurança: o dashboard sobe SEM --insecure → liga a auth OAuth (Nous Portal).
 # Jamais adicione --insecure aqui: desligaria o login e exporia as chaves.
@@ -25,11 +33,8 @@ services:
       - HERMES_GID=${HERMES_GID:-10000}
       - AZURE_FOUNDRY_API_KEY=${AZURE_FOUNDRY_API_KEY:?set no Coolify}
       - AZURE_FOUNDRY_BASE_URL=${AZURE_FOUNDRY_BASE_URL:-https://personal-gutter-resource.openai.azure.com/openai/v1}
-    command: ["gateway", "run"]
-
-  dashboard:
-    image: hermes-agent:latest
-      - AZURE_FOUNDRY_BASE_URL=${AZURE_FOUNDRY_BASE_URL:-https://personal-gutter-resource.openai.azure.com/openai/v1}
+    # Gateway env-driven: sem TELEGRAM_BOT_TOKEN sobe OCIOSO e SAUDÁVEL
+    # (run.py:5235). Para ativar Telegram: adicionar TELEGRAM_BOT_TOKEN + redeploy.
     command: ["gateway", "run"]
 
   dashboard:
@@ -40,15 +45,21 @@ services:
     expose:
       - "9119"
     environment:
+      # Gera labels Traefik + roteia o domínio público -> porta 9119 do dashboard.
       - SERVICE_URL_HERMES_9119
+      # PUBLIC_URL fixo COM https:// — o OAuth monta redirect_uri = PUBLIC_URL +
+      # /auth/callback, que precisa bater EXATO com o registrado no Nous. NÃO usar
+      # ${SERVICE_FQDN_HERMES} aqui: ele vem sem scheme e quebraria o callback.
       - HERMES_DASHBOARD_PUBLIC_URL=https://hermes.iamthalles.com
-      - HERMES_DASHBOARD_OAUTH_CLIENT_ID=${HERMES_DASHBOARD_OAUTH_CLIENT_ID:?se
+      - HERMES_DASHBOARD_OAUTH_CLIENT_ID=${HERMES_DASHBOARD_OAUTH_CLIENT_ID:?set no Coolify}
       - HERMES_UID=${HERMES_UID:-10000}
       - HERMES_GID=${HERMES_GID:-10000}
       - AZURE_FOUNDRY_API_KEY=${AZURE_FOUNDRY_API_KEY:?set no Coolify}
       - AZURE_FOUNDRY_BASE_URL=${AZURE_FOUNDRY_BASE_URL:-https://personal-gutter-resource.openai.azure.com/openai/v1}
     volumes:
       - hermes-data:/opt/data
+    # host 0.0.0.0 (dentro do container) + SEM --insecure → auth OAuth ativa.
+    # NÃO sobrescrever 'entrypoint': a imagem usa /init (s6-overlay) como PID 1.
     command: ["dashboard", "--host", "0.0.0.0", "--no-open"]
 
 volumes:

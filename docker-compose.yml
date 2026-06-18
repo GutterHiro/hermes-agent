@@ -13,17 +13,24 @@
 #   hífen no identificador e a doc do Coolify é contraditória — labels explícitos
 #   são determinísticos e não dependem do parsing do Coolify.
 #
-# IMAGEM (18/06): usa `image:` (não `build:`) — a imagem hermes-agent:latest já
-#   foi construída e está no disco da VPS. Isso evita rebuild (que estourava o
-#   disco de 38GB). Para atualizar o Hermes no futuro: liberar disco e voltar
-#   `build: .` temporariamente, ou usar um registry externo.
+# IMAGEM (18/06): a imagem vem do REGISTRY ghcr.io/gutterhiro/hermes-agent,
+#   construída pelo GitHub Actions (.github/workflows/build-fork-image.yml).
+#   Coolify só faz PULL (~1GB), não builda → não estoura o disco de 38GB.
+#   `pull_policy: always` garante que o redeploy puxe a versão nova de :latest.
+#   ATUALIZAR o Hermes:
+#     1) sincronizar este fork com o upstream NousResearch/hermes-agent
+#     2) o Actions builda e publica a imagem nova automaticamente
+#     3) redeploy no Coolify → puxa a nova
+#   Para deploy DETERMINÍSTICO, troque :latest pela tag de SHA publicada
+#   (ghcr.io/gutterhiro/hermes-agent:<sha>) — aí não depende do pull_policy.
 #
 # Segurança: o dashboard sobe SEM --insecure → liga a auth OAuth (Nous Portal).
 # Jamais adicione --insecure aqui: desligaria o login e exporia as chaves.
 
 services:
   gateway:
-    image: hermes-agent:latest
+    image: ghcr.io/gutterhiro/hermes-agent:latest
+    pull_policy: always
     restart: unless-stopped
     expose:
       - "9119"
@@ -39,7 +46,8 @@ services:
     command: ["gateway", "run"]
 
   dashboard:
-    image: hermes-agent:latest
+    image: ghcr.io/gutterhiro/hermes-agent:latest
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       - gateway

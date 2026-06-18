@@ -1,0 +1,76 @@
+# Build & publish da imagem do Hermes para o ghcr DO FORK (GutterHiro).
+#
+# Por que este workflow existe (e não o docker-publish.yml oficial):
+#   o oficial tem `if: github.repository == 'NousResearch/hermes-agent'`,
+#   então NÃO roda em forks. Este é o equivalente enxuto para o fork:
+#   só amd64 (arquitetura da VPS), publica em ghcr.io/gutterhiro/hermes-agent.
+#
+# Fluxo de atualização do Hermes na VPS:
+#   1. Sincronizar este fork com o upstream (traz código novo).
+#   2. Este workflow builda e publica a imagem nova no ghcr (de graça, fora da VPS).
+#   3. No Coolify, redeploy → puxa a imagem nova (pull leve, sem build local).
+#
+# Dispara em: push na main (quando muda código/Dockerfile) e manualmente.
+
+name: Build Fork Image (ghcr)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'Dockerfile'
+      - 'docker/**'
+      - '.github/workflows/build-fork-image.yml'
+  workflow_dispatch: {}   # permite rodar manualmente pelo botão "Run workflow"
+
+permissions:
+  contents: read
+  packages: write   # necessário para push no ghcr.io
+
+env:
+  IMAGE: ghcr.io/gutterhiro/hermes-agent
+
+jobs:
+  build-and-push:
+    # roda no fork (sem o guard do upstream)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login no ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tags: 'latest' (móvel, p/ conveniência) + o SHA do commit (imutável,
+      # é o que o compose deve referenciar para um pull determinístico).
+      - name: Build & push (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          build-args: |
+            HERMES_GIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=fork-amd64
+          cache-to: type=gha,mode=max,scope=fork-amd64
+
+      - name: Resumo
+        run: |
+          echo "Imagem publicada:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.IMAGE }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.IMAGE }}:${{ github.sha }}\` (imutável — use no compose)" >> $GITHUB_STEP_SUMMARY

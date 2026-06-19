@@ -41,6 +41,11 @@ services:
       - HERMES_GID=${HERMES_GID:-10000}
       - AZURE_FOUNDRY_API_KEY=${AZURE_FOUNDRY_API_KEY:?set no Coolify}
       - AZURE_FOUNDRY_BASE_URL=${AZURE_FOUNDRY_BASE_URL:-https://personal-gutter-resource.openai.azure.com/openai/v1}
+      # WhatsApp: habilitado SÓ no gateway. dashboard=false evita 2 bridges na
+      # mesma sessão (/opt/data) => conflito stream:error "replaced" / reason 440.
+      # IMPORTANTE: NÃO deixar WHATSAPP_ENABLED no /opt/data/.env (override=True
+      # sobrescreveria os dois containers). Mantê-lo só aqui, por serviço.
+      - WHATSAPP_ENABLED=true
     # Gateway env-driven: sem TELEGRAM_BOT_TOKEN sobe OCIOSO e SAUDÁVEL
     # (run.py:5235). Para ativar Telegram: adicionar TELEGRAM_BOT_TOKEN + redeploy.
     command: ["gateway", "run"]
@@ -62,6 +67,8 @@ services:
       - HERMES_GID=${HERMES_GID:-10000}
       - AZURE_FOUNDRY_API_KEY=${AZURE_FOUNDRY_API_KEY:?set no Coolify}
       - AZURE_FOUNDRY_BASE_URL=${AZURE_FOUNDRY_BASE_URL:-https://personal-gutter-resource.openai.azure.com/openai/v1}
+      # WhatsApp DESLIGADO no dashboard — só o gateway roda o bridge (evita conflito).
+      - WHATSAPP_ENABLED=false
     volumes:
       - hermes-data:/opt/data
     # host 0.0.0.0 (dentro do container) + SEM --insecure → auth OAuth ativa.

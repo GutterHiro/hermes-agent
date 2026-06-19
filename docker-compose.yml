@@ -36,6 +36,10 @@ services:
       - "9119"
     volumes:
       - hermes-data:/opt/data
+      # Espelha o MESMO volume em /opt/hermes/.hermes: processos que resolvem o
+      # home p/ /opt/hermes/.hermes (read-only) passam a ler/escrever o home real
+      # (/opt/data). Corrige "[Errno 13] /opt/hermes/.hermes" SEM fragmentar dados.
+      - hermes-data:/opt/hermes/.hermes
     environment:
       - HERMES_UID=${HERMES_UID:-10000}
       - HERMES_GID=${HERMES_GID:-10000}
@@ -78,6 +82,10 @@ services:
       - HERMES_HOME=/opt/data
     volumes:
       - hermes-data:/opt/data
+      # Espelha o MESMO volume em /opt/hermes/.hermes: processos que resolvem o
+      # home p/ /opt/hermes/.hermes (read-only) passam a ler/escrever o home real
+      # (/opt/data). Corrige "[Errno 13] /opt/hermes/.hermes" SEM fragmentar dados.
+      - hermes-data:/opt/hermes/.hermes
     # host 0.0.0.0 (dentro do container) + SEM --insecure → auth OAuth ativa.
     # NÃO sobrescrever 'entrypoint': a imagem usa /init (s6-overlay) como PID 1.
     command: ["dashboard", "--host", "0.0.0.0", "--no-open"]

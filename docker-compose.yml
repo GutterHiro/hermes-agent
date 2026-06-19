@@ -46,6 +46,11 @@ services:
       # IMPORTANTE: NÃO deixar WHATSAPP_ENABLED no /opt/data/.env (override=True
       # sobrescreveria os dois containers). Mantê-lo só aqui, por serviço.
       - WHATSAPP_ENABLED=true
+      # HOME/HERMES_HOME explícitos: caminhos ancorados no home (~/.hermes) e
+      # fallbacks de get_hermes_home caem no volume gravável /opt/data, não em
+      # /opt/hermes (read-only). Corrige "[Errno 13] Permission denied: /opt/hermes/.hermes".
+      - HOME=/opt/data
+      - HERMES_HOME=/opt/data
     # Gateway env-driven: sem TELEGRAM_BOT_TOKEN sobe OCIOSO e SAUDÁVEL
     # (run.py:5235). Para ativar Telegram: adicionar TELEGRAM_BOT_TOKEN + redeploy.
     command: ["gateway", "run"]
@@ -69,6 +74,8 @@ services:
       - AZURE_FOUNDRY_BASE_URL=${AZURE_FOUNDRY_BASE_URL:-https://personal-gutter-resource.openai.azure.com/openai/v1}
       # WhatsApp DESLIGADO no dashboard — só o gateway roda o bridge (evita conflito).
       - WHATSAPP_ENABLED=false
+      - HOME=/opt/data
+      - HERMES_HOME=/opt/data
     volumes:
       - hermes-data:/opt/data
     # host 0.0.0.0 (dentro do container) + SEM --insecure → auth OAuth ativa.

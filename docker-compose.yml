@@ -7,28 +7,47 @@
 #                                o Traefik do Coolify termina TLS e roteia.
 #                                NUNCA use ports:, senão a 9119 vaza no host)
 #
-# ROTEAMENTO (corrigido em 18/06): labels Traefik EXPLÍCITOS no serviço dashboard
-#   (ver bloco labels: abaixo). Espelha o padrão comprovado do coolify.iamthalles.com.
-#   Abandonamos as magic vars SERVICE_FQDN/SERVICE_URL: a forma com porta exige
-#   hífen no identificador e a doc do Coolify é contraditória — labels explícitos
-#   são determinísticos e não dependem do parsing do Coolify.
+# ──────────────────────────────────────────────────────────────────────────
+# ARQUITETURA (consolidada em 21/06): UM ÚNICO container roda o gateway E o
+# dashboard. Antes eram DOIS serviços (gateway + dashboard) separados — e isso
+# era a raiz de toda a dor com o WhatsApp:
 #
-# IMAGEM (18/06): a imagem vem do REGISTRY ghcr.io/gutterhiro/hermes-agent,
-#   construída pelo GitHub Actions (.github/workflows/build-fork-image.yml).
-#   Coolify só faz PULL (~1GB), não builda → não estoura o disco de 38GB.
-#   `pull_policy: always` garante que o redeploy puxe a versão nova de :latest.
+#   O adapter do WhatsApp (plugins/platforms/whatsapp/adapter.py) só REAPROVEITA
+#   uma bridge existente se ela responder em http://127.0.0.1:3000/health, ou
+#   seja, no MESMO localhost. Dois containers NÃO compartilham localhost → o
+#   dashboard nunca achava a bridge do gateway; se tentasse usar WhatsApp, subia
+#   uma 2ª bridge na mesma sessão → "stream:error replaced" / reason 440 (a
+#   conexão boa caía). Por isso tínhamos posto WHATSAPP_ENABLED=false no
+#   dashboard — o que, por sua vez, fazia o web_server FILTRAR o WhatsApp do
+#   status (mostra só plataformas habilitadas no próprio container) e o bot
+#   "não enxergava" a conexão.
+#
+#   SOLUÇÃO: a imagem já foi feita pra rodar os dois juntos. O CMD `gateway run`
+#   é o programa principal (sobe a ÚNICA bridge) e o dashboard sobe como SERVIÇO
+#   s6 LATERAL no mesmo container, ligado por HERMES_DASHBOARD=1 (ver
+#   docker/s6-rc.d/dashboard/run). Compartilhando localhost + PID:
+#     - o dashboard REAPROVEITA a bridge do gateway (sem 2ª conexão);
+#     - enxerga o gateway vivo (mesmo PID namespace) → mostra WhatsApp conectado;
+#     - WHATSAPP_ENABLED=true é único, sem risco de conflito.
+#   Resultado: WhatsApp funciona tanto pelo gateway quanto pelo dashboard.
+# ──────────────────────────────────────────────────────────────────────────
+#
+# IMAGEM: vem do REGISTRY ghcr.io/gutterhiro/hermes-agent, construída pelo
+#   GitHub Actions (.github/workflows/build-fork-image.yml). Coolify só faz PULL
+#   (~1GB), não builda → não estoura o disco de 38GB. `pull_policy: always`
+#   garante que o redeploy puxe a versão nova de :latest.
 #   ATUALIZAR o Hermes:
 #     1) sincronizar este fork com o upstream NousResearch/hermes-agent
 #     2) o Actions builda e publica a imagem nova automaticamente
 #     3) redeploy no Coolify → puxa a nova
-#   Para deploy DETERMINÍSTICO, troque :latest pela tag de SHA publicada
-#   (ghcr.io/gutterhiro/hermes-agent:<sha>) — aí não depende do pull_policy.
+#   Para deploy DETERMINÍSTICO, troque :latest pela tag de SHA publicada.
 #
-# Segurança: o dashboard sobe SEM --insecure → liga a auth OAuth (Nous Portal).
-# Jamais adicione --insecure aqui: desligaria o login e exporia as chaves.
+# Segurança: o dashboard sobe SEM --insecure → a auth OAuth (Nous Portal) liga
+#   sozinha em bind não-loopback quando HERMES_DASHBOARD_OAUTH_CLIENT_ID está
+#   setado. Jamais setar HERMES_DASHBOARD_INSECURE=1 aqui: desligaria o login.
 
 services:
-  gateway:
+  hermes:
     image: ghcr.io/gutterhiro/hermes-agent:latest
     pull_policy: always
     restart: unless-stopped
@@ -45,55 +64,30 @@ services:
       - HERMES_GID=${HERMES_GID:-10000}
       - AZURE_FOUNDRY_API_KEY=${AZURE_FOUNDRY_API_KEY:?set no Coolify}
       - AZURE_FOUNDRY_BASE_URL=${AZURE_FOUNDRY_BASE_URL:-https://personal-gutter-resource.openai.azure.com/openai/v1}
-      # WhatsApp: habilitado SÓ no gateway. dashboard=false evita 2 bridges na
-      # mesma sessão (/opt/data) => conflito stream:error "replaced" / reason 440.
-      # IMPORTANTE: NÃO deixar WHATSAPP_ENABLED no /opt/data/.env (override=True
-      # sobrescreveria os dois containers). Mantê-lo só aqui, por serviço.
+      # WhatsApp habilitado (bridge Baileys sobe no processo `gateway run`).
+      # Agora é seguro =true porque há UM só container/localhost → uma só bridge.
+      # NÃO duplicar WHATSAPP_ENABLED no /opt/data/.env (override=True venceria).
       - WHATSAPP_ENABLED=true
-      # HOME/HERMES_HOME explícitos: caminhos ancorados no home (~/.hermes) e
-      # fallbacks de get_hermes_home caem no volume gravável /opt/data, não em
-      # /opt/hermes (read-only). Corrige "[Errno 13] Permission denied: /opt/hermes/.hermes".
+      # HOME/HERMES_HOME ancorados no volume gravável (não em /opt/hermes RO).
       - HOME=/opt/data
       - HERMES_HOME=/opt/data
-    # Gateway env-driven: sem TELEGRAM_BOT_TOKEN sobe OCIOSO e SAUDÁVEL
-    # (run.py:5235). Para ativar Telegram: adicionar TELEGRAM_BOT_TOKEN + redeploy.
-    command: ["gateway", "run"]
-
-  dashboard:
-    image: ghcr.io/gutterhiro/hermes-agent:latest
-    pull_policy: always
-    restart: unless-stopped
-    depends_on:
-      - gateway
-    expose:
-      - "9119"
-    environment:
+      # Dashboard como SERVIÇO s6 lateral NESTE mesmo container (compartilha
+      # localhost+PID com o gateway → reaproveita a bridge, enxerga o status).
+      - HERMES_DASHBOARD=1
+      - HERMES_DASHBOARD_HOST=0.0.0.0
+      - HERMES_DASHBOARD_PORT=9119
       # PUBLIC_URL fixo COM https:// — o OAuth monta redirect_uri = PUBLIC_URL +
       # /auth/callback, que precisa bater EXATO com o registrado no Nous.
       - HERMES_DASHBOARD_PUBLIC_URL=https://hermes.iamthalles.com
       - HERMES_DASHBOARD_OAUTH_CLIENT_ID=${HERMES_DASHBOARD_OAUTH_CLIENT_ID:?set no Coolify}
-      - HERMES_UID=${HERMES_UID:-10000}
-      - HERMES_GID=${HERMES_GID:-10000}
-      - AZURE_FOUNDRY_API_KEY=${AZURE_FOUNDRY_API_KEY:?set no Coolify}
-      - AZURE_FOUNDRY_BASE_URL=${AZURE_FOUNDRY_BASE_URL:-https://personal-gutter-resource.openai.azure.com/openai/v1}
-      # WhatsApp DESLIGADO no dashboard — só o gateway roda o bridge (evita conflito).
-      - WHATSAPP_ENABLED=false
-      - HOME=/opt/data
-      - HERMES_HOME=/opt/data
-    volumes:
-      - hermes-data:/opt/data
-      # Espelha o MESMO volume em /opt/hermes/.hermes: processos que resolvem o
-      # home p/ /opt/hermes/.hermes (read-only) passam a ler/escrever o home real
-      # (/opt/data). Corrige "[Errno 13] /opt/hermes/.hermes" SEM fragmentar dados.
-      - hermes-data:/opt/hermes/.hermes
-    # host 0.0.0.0 (dentro do container) + SEM --insecure → auth OAuth ativa.
-    # NÃO sobrescrever 'entrypoint': a imagem usa /init (s6-overlay) como PID 1.
-    command: ["dashboard", "--host", "0.0.0.0", "--no-open"]
+    # Programa principal = gateway (mensageria + bridge WhatsApp). O dashboard
+    # roda em paralelo como serviço s6 (HERMES_DASHBOARD=1 acima). NÃO
+    # sobrescrever 'entrypoint': a imagem usa /init (s6-overlay) como PID 1.
+    command: ["gateway", "run"]
     # Labels Traefik EXPLÍCITOS — espelham o padrão comprovado nesta VPS (o
     # próprio coolify.iamthalles.com usa exatamente esta forma: router https +
-    # Host + tls + certresolver letsencrypt + loadbalancer.server.port).
-    # Determinístico: não depende do parsing da magic var (que falhou). O
-    # coolify-proxy (Traefik v3.6) já está na rede deste recurso, então alcança.
+    # Host + tls + certresolver letsencrypt + loadbalancer.server.port). O
+    # coolify-proxy (Traefik v3.6) já está na rede deste recurso → alcança a 9119.
     labels:
       - traefik.enable=true
       - 'traefik.http.routers.hermes-dashboard-https.rule=Host(`hermes.iamthalles.com`)'
